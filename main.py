@@ -14,8 +14,10 @@ import json
 import httpx
 import mmh3
 
+print (f"Hello before load_dotenv")
 # Load environment variables
 load_dotenv()
+print (f"Hello after load_dotenv")
 
 # OpenAI Model Configuration
 OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
