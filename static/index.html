@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG-Powered ChatGPT with Zilliz Cloud</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .main-container {
+            width: 95%;
+            max-width: 1400px;
+            height: 90vh;
+            display: flex;
+            gap: 20px;
+        }
+
+        .chat-container {
+            flex: 2;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .health-container {
+            flex: 1;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            position: relative;
+        }
+
+        .health-header {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .health-header h2 {
+            margin: 0;
+            font-size: 1.4em;
+        }
+
+        .refresh-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 0.8em;
+            transition: all 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .health-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .health-item {
+            background: #f8f9fa;
+            margin-bottom: 15px;
+            padding: 15px;
+            border-radius: 10px;
+            border-left: 4px solid #28a745;
+            transition: all 0.3s ease;
+        }
+
+        .health-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .health-item.error {
+            border-left-color: #dc3545;
+            background: #fff5f5;
+        }
+
+        .health-item.warning {
+            border-left-color: #ffc107;
+            background: #fffbf0;
+        }
+
+        .health-label {
+            font-weight: bold;
+            color: #495057;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .health-value {
+            font-size: 1.1em;
+            color: #212529;
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-dot.green {
+            background: #28a745;
+            box-shadow: 0 0 10px rgba(40, 167, 69, 0.3);
+        }
+
+        .status-dot.red {
+            background: #dc3545;
+            box-shadow: 0 0 10px rgba(220, 53, 69, 0.3);
+        }
+
+        .status-dot.yellow {
+            background: #ffc107;
+            box-shadow: 0 0 10px rgba(255, 193, 7, 0.3);
+        }
+
+        .chat-header h1 {
+            margin-bottom: 5px;
+            font-size: 1.8em;
+        }
+
+        .chat-header p {
+            opacity: 0.9;
+            font-size: 0.9em;
+        }
+
+        .upload-section {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            margin-top: 10px;
+            border-radius: 10px;
+        }
+
+        .upload-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .upload-btn, .init-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.8em;
+            transition: all 0.3s ease;
+        }
+
+        .upload-btn:hover, .init-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        .message {
+            max-width: 80%;
+            margin-bottom: 20px;
+            padding: 15px 20px;
+            border-radius: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            word-wrap: break-word;
+        }
+
+        .user-message {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            margin-left: auto;
+        }
+
+        .bot-message {
+            background: white;
+            color: #333;
+            border: 1px solid #e0e0e0;
+        }
+
+        .sources {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e0e0e0;
+            font-size: 0.8em;
+            color: #666;
+        }
+
+        .sources h4 {
+            margin-bottom: 5px;
+            color: #444;
+        }
+
+        .source-item {
+            background: #f0f0f0;
+            padding: 3px 8px;
+            border-radius: 10px;
+            display: inline-block;
+            margin: 2px;
+            font-size: 0.75em;
+        }
+
+        .typing-indicator {
+            display: none;
+            max-width: 80%;
+            margin-bottom: 20px;
+            padding: 15px 20px;
+            border-radius: 20px;
+            background: white;
+            border: 1px solid #e0e0e0;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 5px;
+        }
+
+        .typing-dots span {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #666;
+            animation: typing 1.4s infinite ease-in-out;
+        }
+
+        .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+        @keyframes typing {
+            0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        .chat-input-container {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .chat-input-form {
+            display: flex;
+            gap: 15px;
+            align-items: flex-end;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 15px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 25px;
+            font-size: 16px;
+            resize: none;
+            min-height: 50px;
+            max-height: 120px;
+            font-family: inherit;
+            transition: border-color 0.3s ease;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .send-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            min-width: 80px;
+        }
+
+        .send-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .send-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            border: 1px solid #fcc;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+
+        .success-message {
+            background: #efe;
+            color: #3c3;
+            border: 1px solid #cfc;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 1024px) {
+            .main-container {
+                flex-direction: column;
+                height: 95vh;
+            }
+            
+            .chat-container {
+                flex: 2;
+            }
+            
+            .health-container {
+                flex: 1;
+                min-height: 300px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .main-container {
+                width: 95%;
+            }
+            
+            .message {
+                max-width: 90%;
+            }
+            
+            .chat-header h1 {
+                font-size: 1.4em;
+            }
+            
+            .upload-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .health-header {
+                padding: 15px;
+            }
+
+            .health-header h2 {
+                font-size: 1.2em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- Chat Container (Left Pane) -->
+        <div class="chat-container">
+            <div class="chat-header">
+                <h1>🤖 RAG-Powered ChatGPT with Zilliz Cloud</h1>
+                <p>Chat with AI enhanced by your Zilliz Cloud knowledge base</p>
+                
+                <div class="upload-section">
+                    <div class="upload-buttons">
+                        <button class="init-btn" onclick="initializeSampleData()">📚 Load Sample Data</button>
+                        <label for="file-upload" class="upload-btn">📁 Upload Document</label>
+                        <input type="file" id="file-upload" class="file-input" accept=".txt,.md" onchange="uploadFile(event)">
+                        <button class="upload-btn" onclick="showAddDocumentForm()">✏️ Add Text</button>
+                    </div>
+                    <div id="upload-status"></div>
+                </div>
+            </div>
+            
+            <div class="chat-messages" id="chat-messages">
+                <div class="message bot-message">
+                    <strong>🤖 Assistant:</strong> Hello! I'm your RAG-powered AI assistant using Zilliz Cloud vector database. I can answer questions based on your knowledge base stored in the cloud. Try uploading some documents or ask me anything!
+                </div>
+            </div>
+            
+            <div class="typing-indicator" id="typing-indicator">
+                <strong>🤖 Assistant is typing...</strong>
+                <div class="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+            
+            <div class="chat-input-container">
+                <form class="chat-input-form" onsubmit="sendMessage(event)">
+                    <textarea 
+                        class="chat-input" 
+                        id="user-input" 
+                        placeholder="Ask me anything about your documents..."
+                        rows="1"
+                        onkeypress="handleKeyPress(event)"
+                        oninput="autoResize(this)"
+                    ></textarea>
+                    <button type="submit" class="send-button" id="send-button">Send</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Health Status Container (Right Pane) -->
+        <div class="health-container">
+            <div class="health-header">
+                <h2>🏥 System Health</h2>
+                <button class="refresh-btn" onclick="loadHealthStatus()" id="refresh-btn">🔄 Refresh</button>
+            </div>
+            
+            <div class="health-content" id="health-content">
+                <div class="health-item">
+                    <div class="health-label">Loading...</div>
+                    <div class="health-value">Please wait while we check system status</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Document Modal (simplified) -->
+    <div id="document-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 10px; width: 90%; max-width: 500px;">
+            <h3>Add Document to Zilliz Cloud Knowledge Base</h3>
+            <input type="text" id="doc-title" placeholder="Document Title" style="width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px;">
+            <textarea id="doc-content" placeholder="Document Content" style="width: 100%; height: 200px; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px;"></textarea>
+            <div style="text-align: right; margin-top: 15px;">
+                <button onclick="hideAddDocumentForm()" style="margin-right: 10px; padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 5px; cursor: pointer;">Cancel</button>
+                <button onclick="addDocument()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">Add Document</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const chatMessages = document.getElementById('chat-messages');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const typingIndicator = document.getElementById('typing-indicator');
+        const uploadStatus = document.getElementById('upload-status');
+        const healthContent = document.getElementById('health-content');
+        const refreshBtn = document.getElementById('refresh-btn');
+
+        // Health status functions
+        async function loadHealthStatus() {
+            try {
+                refreshBtn.disabled = true;
+                refreshBtn.textContent = '⏳ Loading...';
+                healthContent.classList.add('loading');
+
+                const response = await fetch('/health');
+                const healthData = await response.json();
+
+                if (response.ok) {
+                    displayHealthStatus(healthData);
+                } else {
+                    displayHealthError('Failed to load health status');
+                }
+            } catch (error) {
+                displayHealthError(`Error: ${error.message}`);
+            } finally {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = '🔄 Refresh';
+                healthContent.classList.remove('loading');
+            }
+        }
+
+        function displayHealthStatus(healthData) {
+            const healthItems = [
+                {
+                    label: 'Webapp Status',
+                    value: healthData['webapp status'],
+                    type: healthData['webapp status'] === 'healthy' ? 'success' : 'error',
+                    icon: healthData['webapp status'] === 'healthy' ? '✅' : '❌'
+                },
+                {
+                    label: 'Vector Index',
+                    value: healthData['Vector Index'],
+                    type: 'info',
+                    icon: '🔗'
+                },
+                {
+                    label: 'Vector Index Database',
+                    value: healthData['Vector Index database'],
+                    type: 'info',
+                    icon: '📁'
+                },
+                {
+                    label: 'Vector Index Status',
+                    value: healthData['Vector Index status'] ? 'Connected' : 'Disconnected',
+                    type: healthData['Vector Index status'] ? 'success' : 'error',
+                    icon: healthData['Vector Index status'] ? '✅' : '❌'
+                },
+                {
+                    label: 'Embedding Model',
+                    value: healthData.embedding_model,
+                    type: 'info',
+                    icon: '🧠'
+                },
+                {
+                    label: 'Chat Model',
+                    value: healthData.chat_model,
+                    type: 'info',
+                    icon: '💬'
+                },
+                {
+                    label: 'OpenAI Status',
+                    value: healthData.openai_status,
+                    type: healthData.openai_status === 'connected' ? 'success' : 'warning',
+                    icon: healthData.openai_status === 'connected' ? '✅' : '⚠️'
+                }
+            ];
+
+            const healthHTML = healthItems.map(item => {
+                let itemClass = 'health-item';
+                let dotClass = 'status-dot';
+                
+                if (item.type === 'error') {
+                    itemClass += ' error';
+                    dotClass += ' red';
+                } else if (item.type === 'warning') {
+                    itemClass += ' warning';
+                    dotClass += ' yellow';
+                } else if (item.type === 'success') {
+                    dotClass += ' green';
+                }
+
+                return `
+                    <div class="${itemClass}">
+                        <div class="health-label">${item.label}</div>
+                        <div class="health-value">
+                            <div class="status-indicator">
+                                <span class="${dotClass}"></span>
+                                ${item.icon} ${item.value}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            healthContent.innerHTML = healthHTML;
+        }
+
+        function displayHealthError(errorMessage) {
+            healthContent.innerHTML = `
+                <div class="health-item error">
+                    <div class="health-label">Error</div>
+                    <div class="health-value">
+                        <div class="status-indicator">
+                            <span class="status-dot red"></span>
+                            ❌ ${errorMessage}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Auto-refresh health status every 30 seconds
+        function startHealthAutoRefresh() {
+            setInterval(loadHealthStatus, 30000);
+        }
+
+        // Existing chat functions
+        function autoResize(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage(event);
+            }
+        }
+
+        function addMessage(content, isUser, sources = null) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+            
+            let messageHTML = `<strong>${isUser ? '👤 You' : '🤖 Assistant'}:</strong> ${content}`;
+            
+            if (sources && sources.length > 0) {
+                messageHTML += `
+                    <div class="sources">
+                        <h4>📚 Sources:</h4>
+                        ${sources.map(source => `<span class="source-item">${source}</span>`).join('')}
+                    </div>
+                `;
+            }
+            
+            messageDiv.innerHTML = messageHTML;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function showTypingIndicator() {
+            typingIndicator.style.display = 'block';
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function hideTypingIndicator() {
+            typingIndicator.style.display = 'none';
+        }
+
+        function showStatus(message, isError = false) {
+            uploadStatus.innerHTML = `<div class="${isError ? 'error-message' : 'success-message'}">${message}</div>`;
+            setTimeout(() => uploadStatus.innerHTML = '', 3000);
+        }
+
+        async function sendMessage(event) {
+            event.preventDefault();
+            
+            const message = userInput.value.trim();
+            if (!message) return;
+
+            // Disable input
+            sendButton.disabled = true;
+            userInput.disabled = true;
+
+            // Add user message
+            addMessage(message, true);
+            userInput.value = '';
+            userInput.style.height = 'auto';
+
+            // Show typing indicator
+            showTypingIndicator();
+
+            try {
+                const response = await fetch('/ask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: message })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    addMessage(data.response, false, data.sources);
+                } else {
+                    addMessage(`Error: ${data.detail}`, false);
+                }
+            } catch (error) {
+                addMessage(`Error: ${error.message}`, false);
+            } finally {
+                // Re-enable input
+                sendButton.disabled = false;
+                userInput.disabled = false;
+                userInput.focus();
+                hideTypingIndicator();
+            }
+        }
+
+        async function initializeSampleData() {
+            try {
+                showStatus('Loading sample data...');
+                const response = await fetch('/init-sample-data', { method: 'POST' });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showStatus('✅ Sample data loaded successfully!');
+                    addMessage('Sample documents have been loaded into your Zilliz Cloud knowledge base. You can now ask questions about FastAPI, Vector Databases, and Zilliz Cloud!', false);
+                } else {
+                    showStatus(`❌ ${data.detail}`, true);
+                }
+            } catch (error) {
+                showStatus(`❌ Error: ${error.message}`, true);
+            }
+        }
+
+        async function uploadFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                showStatus('Uploading file...');
+                const response = await fetch('/documents/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showStatus(`✅ ${data.message}`);
+                    addMessage(`Document "${file.name}" has been uploaded to your Zilliz Cloud knowledge base!`, false);
+                } else {
+                    showStatus(`❌ ${data.detail}`, true);
+                }
+            } catch (error) {
+                showStatus(`❌ Error: ${error.message}`, true);
+            }
+            
+            // Reset file input
+            event.target.value = '';
+        }
+
+        function showAddDocumentForm() {
+            document.getElementById('document-modal').style.display = 'block';
+        }
+
+        function hideAddDocumentForm() {
+            document.getElementById('document-modal').style.display = 'none';
+            document.getElementById('doc-title').value = '';
+            document.getElementById('doc-content').value = '';
+        }
+
+        async function addDocument() {
+            const title = document.getElementById('doc-title').value.trim();
+            const content = document.getElementById('doc-content').value.trim();
+            
+            if (!title || !content) {
+                alert('Please fill in both title and content');
+                return;
+            }
+
+            try {
+                const response = await fetch('/documents', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ title, content })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showStatus(`✅ ${data.message}`);
+                    addMessage(`Document "${title}" has been added to your Zilliz Cloud knowledge base!`, false);
+                    hideAddDocumentForm();
+                } else {
+                    showStatus(`❌ ${data.detail}`, true);
+                }
+            } catch (error) {
+                showStatus(`❌ Error: ${error.message}`, true);
+            }
+        }
+
+        // Initialize page
+        window.onload = function() {
+            userInput.focus();
+            loadHealthStatus();
+            startHealthAutoRefresh();
+        };
+    </script>
+</body>
+</html> 
