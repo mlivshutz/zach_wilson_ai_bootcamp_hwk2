@@ -1,38 +1,8 @@
-# Web Framework
-fastapi==0.116.1
-uvicorn==0.35.0
-python-multipart==0.0.9
-
-# HTTP Client
-requests==2.32.3
-
-# OpenAI Integration
-openai==1.51.2
-
-# Vector Database & RAG
-pymilvus==2.5.13
-marshmallow==3.19.0
-environs==9.5.0
-mmh3==4.1.0
-# setuptools<81.0.0
-
-# Data Processing
-pandas==2.2.3
-numpy==1.26.4
-
-# Environment Variables
-python-dotenv==1.0.1
-
-# JSON Web Tokens (if needed for authentication)
-PyJWT==2.9.0
-
-# Database (if needed)
-sqlalchemy==2.0.36
-
-# Testing
-pytest==8.3.3
-httpx==0.28.1
-
-# Code Quality
-black==24.10.0
-flake8==7.1.1 
+fastapi
+uvicorn
+python-dotenv
+pymilvus
+numpy
+openai
+httpx
+mmh3 
