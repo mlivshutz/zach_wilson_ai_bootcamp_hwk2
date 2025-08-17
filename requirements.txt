@@ -6,3 +6,5 @@ numpy
 openai
 httpx
 mmh3 
+PyGithub
+requests

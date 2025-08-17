@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Union, Any
+from typing import List, Optional
 import openai
 import os
 from dotenv import load_dotenv
@@ -17,16 +17,18 @@ from github import Github
 import mmh3
 import datetime
 
-
-load_dotenv()
+print (f"Hello before load_dotenv")
+# Load environment variables
+# load_dotenv()
+print (f"Hello after load_dotenv")
 
 # OpenAI Model Configuration
 OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
-OPENAI_CHAT_MODEL = "gpt-4o"
+OPENAI_CHAT_MODEL = "gpt-3.5-turbo"
 EMBEDDING_DIMENSION = 1536  # Dimension for text-embedding-3-small
 
 # Milvus Collection Configuration
-MILVUS_COLLECTION_NAME = "github_dense_index"
+MILVUS_COLLECTION_NAME = "github_dense"
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -107,7 +109,7 @@ class ChatMessage(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
-    sources: Optional[List[Dict[str, Any]]] = None
+    sources: Optional[List[str]] = None
 
 class DocumentUpload(BaseModel):
     title: str
@@ -133,7 +135,6 @@ def setup_milvus_collection():
         FieldSchema(name="repo", dtype=DataType.VARCHAR, max_length=200),
         FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=500),
         FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=20000),
-        FieldSchema(name="chunk", dtype=DataType.INT64),
         FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=EMBEDDING_DIMENSION)  # OpenAI text-embedding-3-small dimension
     ]
     
@@ -163,7 +164,6 @@ def setup_github_sparse_collection():
             FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=200, is_primary=True),
             FieldSchema(name="repo", dtype=DataType.VARCHAR, max_length=200),
             FieldSchema(name="path", dtype=DataType.VARCHAR, max_length=1024),
-            FieldSchema(name="chunk", dtype=DataType.INT64),
             FieldSchema(name="sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="Sparse (BM25-like) index for GitHub files")
@@ -198,38 +198,27 @@ async def get_embedding(text: str) -> List[float]:
         logger.error(f"Error generating embedding: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error generating embedding: {str(e)}")
 
-def chunk_text_with_overlap(text: str, chunk_size: int = 2000, overlap: int = 200) -> List[str]:
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        chunks.append(text[start:end])
-        if end == len(text):
-            break
-        start = end - overlap
-    return chunks
-
-async def store_document(title: str, content: str):
-    # Get embedding
-    chunks = chunk_text_with_overlap(content)
-    for idx, chunk in enumerate(chunks):
-        emb = await get_embedding(chunk)
-        
-        # Generate unique ID using mmh3
-        doc_id = str(mmh3.hash128(title + f"_chunk_{idx}", signed=False))
-        
-        data = [
-            [doc_id],  # id
-            [""],      # repo (blank for non-GitHub)
-            [title],   # title (without chunk number)
-            [chunk],   # content
-            [idx],     # chunk number
-            [emb]      # embedding
-        ]
-        
-        collection.insert(data)
-    collection.load()
-    return {"status": "Document stored successfully", "chunks": len(chunks)}
+async def store_document(title: str, content: str) -> str:
+    """Store document in Milvus vector database"""
+    # Generate a content-based ID using Murmur3 hash
+    doc_id = str(mmh3.hash128(content, signed=False))
+    
+    embedding = await get_embedding(content)
+    
+    # Insert data
+    data = [
+        [doc_id],  # id
+        [""],      # repo (empty for non-GitHub sources)
+        [title],   # title
+        [content], # content
+        [embedding] # embedding
+    ]
+    
+    collection.insert(data)
+    collection.load()  # Load collection to memory for search
+    
+    logger.info(f"Stored document: {title} with ID: {doc_id}")
+    return doc_id
 
 async def retrieve_relevant_docs(query: str, top_k: int = 3) -> List[dict]:
     """Retrieve relevant documents from Milvus"""
@@ -242,7 +231,7 @@ async def retrieve_relevant_docs(query: str, top_k: int = 3) -> List[dict]:
         anns_field="embedding",
         param=search_params,
         limit=top_k,
-        output_fields=["repo", "title", "content", "chunk"]
+        output_fields=["repo", "title", "content"]
     )
     
     docs = []
@@ -251,9 +240,7 @@ async def retrieve_relevant_docs(query: str, top_k: int = 3) -> List[dict]:
             "repo": result.entity.get("repo"),
             "title": result.entity.get("title"),
             "content": result.entity.get("content"),
-            "chunk": result.entity.get("chunk"),
-            "score": result.score,
-            "index_source": collection.name
+            "score": result.score
         })
     
     return docs
@@ -265,7 +252,7 @@ async def retrieve_relevant_docs_sparse(query: str, top_k: int = 3) -> List[dict
     
     # For sparse, embed query as sparse vector (same tokenizer as ingest)
     query_sparse = _compute_sparse_embedding(query)
-    if not query_sparse:
+    if not query_sparse["indices"]:
         return []
     
     search_params = {"metric_type": "IP", "params": {}}
@@ -275,7 +262,7 @@ async def retrieve_relevant_docs_sparse(query: str, top_k: int = 3) -> List[dict
         anns_field="sparse_emb",
         param=search_params,
         limit=top_k,
-        output_fields=["repo", "path", "chunk"]
+        output_fields=["repo", "path"]
     )
     
     docs = []
@@ -283,9 +270,7 @@ async def retrieve_relevant_docs_sparse(query: str, top_k: int = 3) -> List[dict
         docs.append({
             "repo": result.entity.get("repo"),
             "path": result.entity.get("path"),
-            "chunk": result.entity.get("chunk"),
-            "score": result.score,
-            "index_source": collection_github_sparse.name
+            "score": result.score
         })
     return docs
 
@@ -309,30 +294,12 @@ async def rerank_documents(query: str, documents: List[dict]) -> List[dict]:
         scored_docs.append(doc)
     return sorted(scored_docs, key=lambda x: x["rerank_score"], reverse=True)
 
-async def generate_rag_response(query: str) -> tuple[str, List[Dict[str, str]]]:
+async def generate_rag_response(query: str) -> tuple[str, List[str]]:
     """Generate response using RAG (Retrieval-Augmented Generation)"""
     # Retrieve from both dense and sparse (GitHub-focused)
     dense_docs = await retrieve_relevant_docs(query, top_k=5)
     sparse_docs = await retrieve_relevant_docs_sparse(query, top_k=5)
-
-    print(f"Dense index retrieval: For user prompt ->{query}<- loaded {len(dense_docs)} documents:\n")
-    for doc in dense_docs:
-        content = doc.get("content", doc.get("text", ""))
-        title = doc.get("title", doc.get("path", "Unknown"))
-        repo = doc.get("repo", "")
-        chunk_num = doc.get("chunk", "")
-        print(f"Repo: {repo}, Title: {title}, Chunk: {chunk_num}\nContent length: {len(content)}\n")
-    print("\n")
-
-    print(f"Sparse index retrieval: For user prompt ->{query}<- loaded {len(sparse_docs)} documents:\n")
-    for doc in sparse_docs:
-        # Sparse docs only have repo/path, no content stored
-        path = doc.get("path", "Unknown")
-        repo = doc.get("repo", "Unknown")
-        chunk_num = doc.get("chunk", "")
-        print(f"Repo: {repo}, Path: {path}, Chunk: {chunk_num}\nContent length: Not stored in sparse index\n")
-    print("\n")
-
+    
     # Combine and deduplicate by some key (e.g., title/path)
     combined_docs = {doc["title"] if "title" in doc else doc["path"]: doc for doc in dense_docs + sparse_docs}.values()
     
@@ -345,15 +312,13 @@ async def generate_rag_response(query: str) -> tuple[str, List[Dict[str, str]]]:
     # Build context from retrieved documents
     context = ""
     sources = []
-    print(f"Final reranked RAG response: For user prompt ->{query}<- loaded {len(relevant_docs)} documents:\n")
+    print(f"For user prompt ->{query}<- loaded {len(relevant_docs)} documents:\n")
     for doc in relevant_docs:
         content = doc.get("content", doc.get("text", ""))
         title = doc.get("title", doc.get("path", "Unknown"))
-        repo = doc.get("repo", "")
-        chunk_num = doc.get("chunk", "")
         context += f"Title: {title}\nContent: {content}\n\n"
-        sources.append({"title": title, "index": doc["index_source"], "repo": repo, "chunk": str(chunk_num) if chunk_num is not None else ""})
-        print(f"Repo: {repo}, Title: {title}, Chunk: {chunk_num} (from {doc["index_source"]})\nContent length: {len(content)}\n")
+        sources.append(title)
+        print(f"Title: {title}\nContent length: {len(content)}\n")
     print("\n")
 
     # Create RAG prompt
@@ -417,9 +382,7 @@ async def ingest_github(req: IngestGithubRequest):
     # Use existing Milvus collection
     if collection is None:
         raise HTTPException(status_code=500, detail="Milvus collection not initialized")
-    if collection_github_sparse is None:
-        raise HTTPException(status_code=500, detail="GitHub sparse collection not initialized")
-    print(f"[{datetime.datetime.now().isoformat()}] Starting ingestion for repo: {req.repo} into dense index: {collection.name} and sparse index: {collection_github_sparse.name}")
+    print(f"[{datetime.datetime.now().isoformat()}] Starting ingestion for repo: {req.repo} into index: {collection.name}")
     # Upsert via Milvus SDK for this app
     files = _fetch_github_files(req.repo)
     count = 0
@@ -427,42 +390,26 @@ async def ingest_github(req: IngestGithubRequest):
         text = f.get("content", "")
         if not text:
             continue
-        chunks = chunk_text_with_overlap(text)
+        chunks = chunk_text(text)
         for chunk_idx, chunk in enumerate(chunks):
             try:
-                # Dense insert
                 emb = await get_embedding(chunk)
                 chunk_id = str(mmh3.hash128(req.repo + '/' + f["path"] + f"_chunk_{chunk_idx}", signed=False))
                 data = [
                     [chunk_id],                    # id
                     [req.repo],                    # repo
-                    [f["path"]],                   # title (without chunk number)
+                    [f["path"] + f" chunk {chunk_idx}"],  # title
                     [chunk],                       # content
-                    [chunk_idx],                   # chunk number
                     [emb]                          # embedding
                 ]
                 collection.insert(data)
-                
-                # Sparse insert for the same chunk
-                sparse = _compute_sparse_embedding(chunk)
-                if sparse:
-                    sparse_data = [
-                        [chunk_id],
-                        [req.repo],
-                        [f["path"]],                   # path (without chunk number)
-                        [chunk_idx],                   # chunk number
-                        [sparse]
-                    ]
-                    collection_github_sparse.insert(sparse_data)
-                
                 count += 1
             except Exception as e:
                 logger.warning(f"Skip {f.get('path')} chunk {chunk_idx}: {e}")
                 continue
     collection.load()
-    collection_github_sparse.load()
     print(f"[{datetime.datetime.now().isoformat()}] Ingestion completed for repo: {req.repo}. Files ingested: {count}")
-    return {"files_ingested": count, "dense_collection": collection.name, "sparse_collection": collection_github_sparse.name}
+    return {"files_ingested": count}
 
 
 # ---------------- Sparse GitHub Ingestion (BM25-like) ----------------
@@ -477,15 +424,16 @@ def _compute_sparse_embedding(text: str) -> dict:
     from collections import Counter
     terms = _tokenize(text)
     if not terms:
-        return {}
+        return {"indices": [], "values": []}
     counts = Counter(terms)
-    sparse = {}
+    indices = []
+    values = []
     for term, tf in counts.items():
         idx = mmh3.hash(term, signed=False) % 1000000  # hash to a large dim space
         weight = 1.0 + (tf ** 0.5)  # sublinear tf
-        sparse[idx] = weight
-    # Sort by index
-    return dict(sorted(sparse.items()))
+        indices.append(int(idx))
+        values.append(float(weight))
+    return {"indices": indices, "values": values}
 
 def chunk_text(text: str, max_len: int = 20000) -> List[str]:
     return [text[i:i+max_len] for i in range(0, len(text), max_len)]
@@ -500,7 +448,7 @@ async def ingest_github_sparse(req: IngestGithubSparseRequest):
     print(f"[{datetime.datetime.now().isoformat()}] Starting ingestion for repo: {req.repo} into index: {collection_github_sparse.name}")
     files = _fetch_github_files(req.repo)
     count = 0
-    rows_id, rows_repo, rows_path, rows_chunk, rows_sparse = [], [], [], [], []
+    rows_id, rows_repo, rows_path, rows_sparse = [], [], [], []
     for f in files:
         text = f.get("content", "")
         if not text:
@@ -510,12 +458,12 @@ async def ingest_github_sparse(req: IngestGithubSparseRequest):
             try:
                 doc_id = str(mmh3.hash128(req.repo + '/' + f["path"] + f"_chunk_{chunk_idx}", signed=False))
                 sparse = _compute_sparse_embedding(chunk)
-                if sparse:
-                    rows_id.append(doc_id)
-                    rows_repo.append(req.repo)
-                    rows_path.append(f["path"])
-                    rows_chunk.append(chunk_idx)
-                    rows_sparse.append(sparse)
+                if not sparse["indices"]:
+                    continue
+                rows_id.append(doc_id)
+                rows_repo.append(req.repo)
+                rows_path.append(f["path"] + f"_chunk_{chunk_idx}")
+                rows_sparse.append(sparse)
                 count += 1
             except Exception as e:
                 logger.warning(f"Sparse skip {f.get('path')} chunk {chunk_idx}: {e}")
@@ -526,7 +474,6 @@ async def ingest_github_sparse(req: IngestGithubSparseRequest):
             rows_id,
             rows_repo,
             rows_path,
-            rows_chunk,
             rows_sparse,
         ])
         collection_github_sparse.load()
@@ -557,32 +504,11 @@ async def health_check():
     has_openai_client = client is not None
     is_milvus_connected = utility.has_collection(MILVUS_COLLECTION_NAME)
     
-    # Get collection counts and names (refresh from Zilliz source of truth)
-    dense_count = 0
-    sparse_count = 0
-    dense_name = "N/A"
-    sparse_name = "N/A"
-    try:
-        if collection:
-            # Flush to ensure all operations are persisted
-            collection.flush()
-            # Get fresh count from Zilliz
-            dense_count = collection.num_entities
-            dense_name = collection.name
-        if collection_github_sparse:
-            # Flush to ensure all operations are persisted
-            collection_github_sparse.flush()
-            # Get fresh count from Zilliz
-            sparse_count = collection_github_sparse.num_entities
-            sparse_name = collection_github_sparse.name
-    except Exception as e:
-        logger.warning(f"Could not get collection counts: {e}")
-    
     return {
         "webapp status": "healthy",
-        "Zilliz Cloud Vector Index Status": is_milvus_connected,
-        f"{dense_name} Count": dense_count,
-        f"{sparse_name} Count": sparse_count,
+        "Vector Index": "Zilliz Cloud",
+        "Vector Index database": MILVUS_COLLECTION_NAME,
+        "Vector Index status": is_milvus_connected,
         "embedding_model": OPENAI_EMBEDDING_MODEL,
         "chat_model": OPENAI_CHAT_MODEL,
         "openai_status": "connected" if has_openai_client else "not configured"
