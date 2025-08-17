@@ -22,7 +22,7 @@ load_dotenv()
 
 # OpenAI Model Configuration
 OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
-OPENAI_CHAT_MODEL = "gpt-4o"
+OPENAI_CHAT_MODEL = "gpt-4.1-mini"
 EMBEDDING_DIMENSION = 1536  # Dimension for text-embedding-3-small
 
 # Milvus Collection Configuration
@@ -356,15 +356,15 @@ async def generate_rag_response(query: str) -> tuple[str, List[Dict[str, str]]]:
         print(f"Repo: {repo}, Title: {title}, Chunk: {chunk_num} (from {doc["index_source"]})\nContent length: {len(content)}\n")
     print("\n")
 
-    # Create RAG prompt
-    rag_prompt = f"""You are a helpful AI assistant. Use the following context to answer the user's question. If the context doesn't contain relevant information, say so and provide a general response.
+    # Create RAG prompt with creativity control via instructions
+    rag_prompt = f"""You are a precise, knowledgeable AI assistant. Use the following context to answer the user's question accurately and factually. Stay grounded in the provided information.
 
 Context:
 {context}
 
 User Question: {query}
 
-Please provide a helpful and accurate response based on the context provided:"""
+Instructions: Provide a clear, accurate response based on the context. If the context doesn't fully answer the question, clearly state what information is available and what is missing. Be direct and factual."""
     
     try:
         # Get OpenAI client and generate response
@@ -372,7 +372,7 @@ Please provide a helpful and accurate response based on the context provided:"""
         response = await openai_client.chat.completions.create(
             model=OPENAI_CHAT_MODEL,
             messages=[
-                {"role": "system", "content": "You are a helpful AI assistant that answers questions based on provided context."},
+                {"role": "system", "content": "You are a precise, factual AI assistant. Provide accurate answers based strictly on the provided context. Avoid speculation or creative interpretation."},
                 {"role": "user", "content": rag_prompt}
             ],
             max_tokens=500,
