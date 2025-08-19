@@ -391,6 +391,9 @@ Instructions: Provide a clear, accurate response based on the context. If the co
 class IngestGithubRequest(BaseModel):
     repo: str
 
+class DeleteGithubRequest(BaseModel):
+    repo: str
+
 def _fetch_github_files(repo_full_name: str) -> List[dict]:
     token = os.getenv('GITHUB_PAT')
     if not token:
@@ -463,6 +466,56 @@ async def ingest_github(req: IngestGithubRequest):
     collection_github_sparse.load()
     print(f"[{datetime.datetime.now().isoformat()}] Ingestion completed for repo: {req.repo}. Files ingested: {count}")
     return {"files_ingested": count, "dense_collection": collection.name, "sparse_collection": collection_github_sparse.name}
+
+
+@app.post("/delete-github-repo")
+async def delete_github_repo(req: DeleteGithubRequest):
+    """Delete all vector index entries for a given GitHub repo."""
+    if not req.repo or not '/' in req.repo:
+        raise HTTPException(status_code=400, detail="Invalid repo name format. Use 'owner/repo'.")
+
+    repo_name = req.repo.strip()
+    logger.info(f"Attempting to delete all entries for repo: {repo_name}")
+
+    try:
+        # Define the expression to match the repo
+        expr = f"repo == '{repo_name}'"
+
+        # Query to check if entries exist before deleting
+        dense_results = collection.query(expr, output_fields=["id"])
+        sparse_results = collection_github_sparse.query(expr, output_fields=["id"])
+
+        if not dense_results and not sparse_results:
+            raise HTTPException(status_code=404, detail=f"Repo '{repo_name}' not found in any vector index.")
+
+        total_deleted = 0
+
+        # Delete from dense collection
+        if dense_results:
+            delete_result_dense = collection.delete(expr)
+            logger.info(f"Deleted from dense collection '{collection.name}': {delete_result_dense}")
+            total_deleted += len(dense_results)
+
+        # Delete from sparse collection
+        if sparse_results:
+            delete_result_sparse = collection_github_sparse.delete(expr)
+            logger.info(f"Deleted from sparse collection '{collection_github_sparse.name}': {delete_result_sparse}")
+            total_deleted += len(sparse_results)
+        
+        # Persist the deletions
+        collection.flush()
+        if collection_github_sparse:
+            collection_github_sparse.flush()
+
+        logger.info(f"Successfully deleted {total_deleted} entries for repo: {repo_name}")
+        return {"message": f"Successfully deleted {total_deleted} entries for repo '{repo_name}'.", "deleted_count": total_deleted}
+
+    except HTTPException as http_exc:
+        # Re-raise HTTPException to be handled by FastAPI
+        raise http_exc
+    except Exception as e:
+        logger.error(f"Error deleting repo '{repo_name}': {e}")
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred while deleting the repo: {e}")
 
 
 # ---------------- Sparse GitHub Ingestion (BM25-like) ----------------
